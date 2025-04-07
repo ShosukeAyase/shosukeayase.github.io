@@ -21,6 +21,9 @@
     #difficultyPanel {
       margin-top: 20px;
     }
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -38,44 +41,41 @@
   <canvas id="gameCanvas" width="500" height="400"></canvas>
   <br>
   <!-- 通常モード用操作ボタン -->
-  <button id="leverButton" style="display:none;">レバー操作</button>
+  <button id="leverButton" class="hidden">レバー操作</button>
   <!-- UltraHard用：左右操作ボタン -->
-  <button id="leftButton" style="display:none;">左に動かす</button>
-  <button id="rightButton" style="display:none;">右に動かす</button>
+  <button id="leftButton" class="hidden">左に動かす</button>
+  <button id="rightButton" class="hidden">右に動かす</button>
   <!-- 共通：新規開始・難易度選択／エンドレス中断ボタン -->
-  <button id="newGameButton" style="display:none;">新しくゲームを始める</button>
-  <button id="changeDifficultyButton" style="display:none;">難易度選択に戻る</button>
+  <button id="newGameButton" class="hidden">新しくゲームを始める</button>
+  <button id="changeDifficultyButton" class="hidden">難易度選択に戻る</button>
   <!-- エンドレスモード用：中断してスタートに戻るボタン -->
-  <button id="quitButton" style="display:none;">中断してスタートに戻る</button>
+  <button id="quitButton" class="hidden">中断してスタートに戻る</button>
   <p id="info"></p>
   
   <script>
-    // 各要素の取得
+    // 各要素の取得とボタン参照の最適化
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     const info = document.getElementById("info");
     const difficultyPanel = document.getElementById("difficultyPanel");
-    const easyModeButton = document.getElementById("easyModeButton");
-    const hardModeButton = document.getElementById("hardModeButton");
-    const endless30Button = document.getElementById("endless30Button");
-    const endless60Button = document.getElementById("endless60Button");
-    const ultraHardButton = document.getElementById("ultraHardButton");
-    const leverButton = document.getElementById("leverButton");
-    const leftButton = document.getElementById("leftButton");
-    const rightButton = document.getElementById("rightButton");
-    const newGameButton = document.getElementById("newGameButton");
-    const changeDifficultyButton = document.getElementById("changeDifficultyButton");
-    const quitButton = document.getElementById("quitButton");
-
-    // キャラクターのデータ
-    const characters = {
-      criminal: { points: 1, label: "犯罪者" },
-      neet: { points: 2, label: "ニート" },
-      elderly: { points: 3, label: "高齢者" },
-      common: { points: 5, label: "一般人" },
-      child: { points: 7, label: "子ども" },
-      rich: { points: 10, label: "金持ち" }
+    const buttons = {
+      leverButton: document.getElementById("leverButton"),
+      leftButton: document.getElementById("leftButton"),
+      rightButton: document.getElementById("rightButton"),
+      newGameButton: document.getElementById("newGameButton"),
+      changeDifficultyButton: document.getElementById("changeDifficultyButton"),
+      quitButton: document.getElementById("quitButton")
     };
+
+    // キャラクターのデータ - 効率的な参照用に配列化
+    const characterList = [
+      { points: 1, label: "犯罪者" },
+      { points: 2, label: "ニート" },
+      { points: 3, label: "高齢者" },
+      { points: 5, label: "一般人" },
+      { points: 7, label: "子ども" },
+      { points: 10, label: "金持ち" }
+    ];
 
     // グローバル変数
     let lanes = [];         // 各レーンの対象リスト
@@ -85,81 +85,97 @@
     let startTime = null;
     let animationFrameId;
     let trolleyY = 0;
+    let lastTimestamp = 0;  // 最後のフレーム時刻
+    
     const startYCoord = 0;  // トロッコの初期Y座標
     const collisionY = 250; // 対象が表示される開始位置
 
     // モード管理用変数
-    // gameMode: "normal", "endless", "ultraHard"
     let gameMode = "normal";
-    // 通常モード用：difficultyMode ("easy" / "hard")
     let difficultyMode = "";
-    // エンドレスモード用
     let endlessTotalTime = 0;
     let endlessStartTime = 0;
     let endlessRoundCount = 0;
     let endlessClearedCount = 0;
     let endlessTotalScore = 0;
     let endlessTimeoutId = null;
-    // 各ラウンドの制限時間（ms）
     let roundTime = 3000;
+    
+    // キャッシュされた計算値
+    const cachedValues = {
+      laneWidth: 0
+    };
 
-    // ランダムにキャラクターを選ぶ
+    // キャッシュ更新
+    function updateCache() {
+      cachedValues.laneWidth = canvas.width / laneCount;
+    }
+
+    // ランダムにキャラクターを選ぶ（最適化版）
     function randomCharacter() {
-      const keys = Object.keys(characters);
-      const randomKey = keys[Math.floor(Math.random() * keys.length)];
-      return characters[randomKey];
+      return characterList[Math.floor(Math.random() * characterList.length)];
     }
 
     // 指定人数分の対象を生成する
     function generateLaneWithCount(count) {
-      let laneTargets = [];
+      const laneTargets = new Array(count);
       for (let i = 0; i < count; i++) {
-        laneTargets.push(randomCharacter());
+        laneTargets[i] = randomCharacter();
       }
       return laneTargets;
     }
 
     // モードに応じたレーン数・対象数の初期化
     function initLanes() {
+      // レーン数の設定
+      laneCount = (gameMode === "ultraHard") ? 3 : 2;
+      
+      // 対象数の範囲設定
       let minCount, maxCount;
       if (gameMode === "ultraHard") {
-        laneCount = 3;
         minCount = 5; maxCount = 8;
-      } else if (gameMode === "normal" || gameMode === "endless") {
-        laneCount = 2;
-        if (gameMode === "normal") {
-          if (difficultyMode === "easy") { minCount = 3; maxCount = 5; }
-          else if (difficultyMode === "hard") { minCount = 5; maxCount = 8; }
-        } else {
-          // エンドレスモード：人数は 3～5 人
-          minCount = 3; maxCount = 5;
+      } else if (gameMode === "normal") {
+        if (difficultyMode === "easy") { 
+          minCount = 3; maxCount = 5; 
+        } else { 
+          minCount = 5; maxCount = 8; 
         }
+      } else { // endless
+        minCount = 3; maxCount = 5;
       }
+      
       targetCount = Math.floor(Math.random() * (maxCount - minCount + 1)) + minCount;
       
-      // エンドレスモード（2レーン）の場合、左右の合計得点が同じになるケースを回避
+      // レーン生成
+      lanes = new Array(laneCount);
+      for (let i = 0; i < laneCount; i++) {
+        lanes[i] = generateLaneWithCount(targetCount);
+      }
+      
+      // エンドレスモードで左右の得点が同じになるケースを回避
       if (gameMode === "endless" && laneCount === 2) {
-        let lanesCandidate, score0, score1;
-        do {
-          lanesCandidate = [];
-          for (let i = 0; i < laneCount; i++) {
-            lanesCandidate.push(generateLaneWithCount(targetCount));
-          }
-          score0 = lanesCandidate[0].reduce((s, t) => s + t.points, 0);
-          score1 = lanesCandidate[1].reduce((s, t) => s + t.points, 0);
-        } while (score0 === score1);
-        lanes = lanesCandidate;
-      } else {
-        lanes = [];
-        for (let i = 0; i < laneCount; i++) {
-          lanes.push(generateLaneWithCount(targetCount));
+        const score0 = lanes[0].reduce((s, t) => s + t.points, 0);
+        const score1 = lanes[1].reduce((s, t) => s + t.points, 0);
+        
+        if (score0 === score1) {
+          // 得点が同じ場合、片方のレーンを再生成
+          lanes[1] = generateLaneWithCount(targetCount);
         }
+      }
+    }
+
+    // ボタン表示の切り替え（最適化版）
+    function setButtonVisibility(config) {
+      for (const [buttonId, isVisible] of Object.entries(config)) {
+        buttons[buttonId].classList.toggle('hidden', !isVisible);
       }
     }
 
     // 各ラウンドの初期化処理
     function initGame() {
       initLanes();
+      updateCache();
+      
       // キャンバスの高さを、対象数に合わせて動的に調整
       canvas.height = collisionY + 30 + (targetCount * 25) + 20;
       
@@ -176,214 +192,219 @@
       trolleyLane = (gameMode === "ultraHard") ? 1 : 0;
       startTime = null;
       trolleyY = startYCoord;
+      
       if (gameMode === "normal" || gameMode === "endless") {
         info.innerText = "";
       }
-      // 操作ボタンの表示切替
+      
+      // ボタン表示の設定
+      difficultyPanel.classList.add('hidden');
+      
       if (gameMode === "ultraHard") {
-        leverButton.style.display = "none";
-        leftButton.style.display = "inline-block";
-        rightButton.style.display = "inline-block";
-        quitButton.style.display = "none";
+        setButtonVisibility({
+          leverButton: false,
+          leftButton: true,
+          rightButton: true,
+          quitButton: false,
+          newGameButton: false,
+          changeDifficultyButton: false
+        });
       } else if (gameMode === "endless") {
-        // エンドレスモードでは通常のレバー操作ボタンと中断ボタンを表示
-        leverButton.style.display = "inline-block";
-        leftButton.style.display = "none";
-        rightButton.style.display = "none";
-        quitButton.style.display = "inline-block";
+        setButtonVisibility({
+          leverButton: true,
+          leftButton: false,
+          rightButton: false,
+          quitButton: true,
+          newGameButton: false,
+          changeDifficultyButton: false
+        });
       } else {
-        leverButton.style.display = "inline-block";
-        leftButton.style.display = "none";
-        rightButton.style.display = "none";
-        quitButton.style.display = "none";
+        setButtonVisibility({
+          leverButton: true,
+          leftButton: false,
+          rightButton: false,
+          quitButton: false,
+          newGameButton: false,
+          changeDifficultyButton: false
+        });
       }
-      newGameButton.style.display = "none";
-      changeDifficultyButton.style.display = "none";
-      difficultyPanel.style.display = "none";
     }
 
-    // 描画関数
+    // 描画関数（最適化版）
     function drawGame() {
+      const laneW = cachedValues.laneWidth;
+      
+      // キャンバスをクリア
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const laneW = canvas.width / laneCount;
       
       // レーン区切り線の描画
-      ctx.strokeStyle = "#000";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let i = 1; i < laneCount; i++) {
-        ctx.moveTo(i * laneW, 0);
-        ctx.lineTo(i * laneW, canvas.height);
+      if (laneCount > 1) {
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 1; i < laneCount; i++) {
+          const x = i * laneW;
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvas.height);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
       
       // 各レーンの対象描画
       ctx.font = "18px Arial";
       ctx.textAlign = "center";
       ctx.fillStyle = "black";
+      
       for (let i = 0; i < laneCount; i++) {
-        for (let j = 0; j < lanes[i].length; j++) {
-          let target = lanes[i][j];
-          let targetY = collisionY + 30 + j * 25;
-          ctx.fillText(target.label + " (" + target.points + "点)", laneW/2 + i * laneW, targetY);
+        const lane = lanes[i];
+        const laneX = laneW/2 + i * laneW;
+        
+        for (let j = 0; j < lane.length; j++) {
+          const target = lane[j];
+          const targetY = collisionY + 30 + j * 25;
+          ctx.fillText(`${target.label} (${target.points}点)`, laneX, targetY);
         }
       }
       
-      // トロッコの描画（現在のレーンに合わせたX座標）
+      // トロッコの描画
       const trolleyX = (trolleyLane * laneW) + laneW/2;
       ctx.fillStyle = "red";
       ctx.fillRect(trolleyX - 20, trolleyY - 20, 40, 40);
+    }
+
+    // 時間情報の更新
+    function updateTimeInfo() {
+      if (!startTime) return;
       
-      // 残り時間の表示（エンドレスモードは累計情報も表示）
       const elapsed = performance.now() - startTime;
       const remaining = Math.max(0, ((roundTime - elapsed) / 1000).toFixed(1));
+      
       if (gameMode === "endless") {
         const overallElapsed = performance.now() - endlessStartTime;
         const overallRemaining = Math.max(0, ((endlessTotalTime - overallElapsed) / 1000).toFixed(1));
-        info.innerText = "【エンドレスモード】残り時間: " + overallRemaining +
-                         "秒　ラウンド: " + endlessRoundCount +
-                         "　クリア: " + endlessClearedCount +
-                         "　総合得点: " + endlessTotalScore;
+        info.innerText = `【エンドレスモード】残り時間: ${overallRemaining}秒　ラウンド: ${endlessRoundCount}　クリア: ${endlessClearedCount}　総合得点: ${endlessTotalScore}`;
       } else {
-        info.innerText = "残り時間: " + remaining + "秒";
+        info.innerText = `残り時間: ${remaining}秒`;
       }
     }
 
-    // アニメーションループ
+    // アニメーションループ（最適化版）
     function animate(timestamp) {
       if (!startTime) startTime = timestamp;
+      
+      // 前回のフレームから60fps以上の頻度で呼び出されている場合はスキップ
+      if (timestamp - lastTimestamp < 16) {
+        animationFrameId = requestAnimationFrame(animate);
+        return;
+      }
+      
+      lastTimestamp = timestamp;
       const elapsed = timestamp - startTime;
+      
+      // トロッコの位置を更新
       trolleyY = startYCoord + (collisionY - startYCoord) * (elapsed / roundTime);
+      
+      // 描画と時間情報の更新
       drawGame();
+      updateTimeInfo();
+      
       if (elapsed < roundTime) {
         animationFrameId = requestAnimationFrame(animate);
       } else {
         trolleyY = collisionY;
         drawGame();
+        updateTimeInfo();
         endRound();
       }
     }
 
+    // レーンの得点を計算（最適化版）
+    function calculateLaneScores() {
+      const scores = new Array(laneCount);
+      for (let i = 0; i < laneCount; i++) {
+        scores[i] = lanes[i].reduce((sum, target) => sum + target.points, 0);
+      }
+      return scores;
+    }
+
     // 各ラウンド終了時の処理
     function endRound() {
-      let laneScores = [];
-      for (let i = 0; i < laneCount; i++) {
-        let sum = lanes[i].reduce((s, t) => s + t.points, 0);
-        laneScores.push(sum);
-      }
+      const laneScores = calculateLaneScores();
       const chosenScore = laneScores[trolleyLane];
+      
+      // 最大の他レーン得点を見つける
       let maxOther = -1;
       for (let i = 0; i < laneCount; i++) {
         if (i !== trolleyLane && laneScores[i] > maxOther) {
           maxOther = laneScores[i];
         }
       }
-      let roundCleared = (chosenScore > maxOther);
+      
+      const roundCleared = (chosenScore > maxOther);
       
       if (gameMode === "endless") {
         endlessRoundCount++;
         if (roundCleared) endlessClearedCount++;
         endlessTotalScore += chosenScore;
+        
+        if (endlessTimeoutId) {
+          clearTimeout(endlessTimeoutId);
+        }
+        
         endlessTimeoutId = setTimeout(() => {
           const overallElapsed = performance.now() - endlessStartTime;
           if (overallElapsed < endlessTotalTime) {
             initGame();
             requestAnimationFrame(animate);
           } else {
-            info.innerText = "エンドレスモード終了！総ラウンド: " + endlessRoundCount +
-                             "　クリア: " + endlessClearedCount +
-                             "　総合得点: " + endlessTotalScore;
-            leverButton.style.display = "none";
-            leftButton.style.display = "none";
-            rightButton.style.display = "none";
-            newGameButton.style.display = "inline-block";
-            changeDifficultyButton.style.display = "inline-block";
-            quitButton.style.display = "none";
+            info.innerText = `エンドレスモード終了！総ラウンド: ${endlessRoundCount}　クリア: ${endlessClearedCount}　総合得点: ${endlessTotalScore}`;
+            
+            setButtonVisibility({
+              leverButton: false,
+              leftButton: false,
+              rightButton: false,
+              quitButton: false,
+              newGameButton: true,
+              changeDifficultyButton: true
+            });
           }
         }, 500);
       } else {
+        // 結果メッセージ生成
         let resultMessage = "各レーンの得点：";
         for (let i = 0; i < laneCount; i++) {
-          resultMessage += " レーン" + (i+1) + ": " + laneScores[i] + "点";
+          resultMessage += ` レーン${(i+1)}: ${laneScores[i]}点`;
         }
         resultMessage += (roundCleared ? "　クリア！" : "　残念、クリアできませんでした。");
         info.innerText = "ゲーム終了！" + resultMessage;
-        newGameButton.style.display = "inline-block";
-        changeDifficultyButton.style.display = "inline-block";
+        
+        setButtonVisibility({
+          leverButton: false,
+          leftButton: false,
+          rightButton: false,
+          quitButton: false,
+          newGameButton: true,
+          changeDifficultyButton: true
+        });
       }
     }
 
-    // 通常モード用レバー操作（複数回操作可能に修正）
-    leverButton.addEventListener("click", function() {
-      // 何度でもトグル可能（ラウンド終了前の最終状態が採用される）
-      trolleyLane = (trolleyLane === 0) ? 1 : 0;
-      drawGame();
-    });
-    // UltraHard用左右操作
-    leftButton.addEventListener("click", function() {
-      if (gameMode === "ultraHard" && trolleyLane > 0) {
-        trolleyLane--;
-        drawGame();
-      }
-    });
-    rightButton.addEventListener("click", function() {
-      if (gameMode === "ultraHard" && trolleyLane < laneCount - 1) {
-        trolleyLane++;
-        drawGame();
-      }
-    });
-
-    // 新しくゲームを始めるボタン
-    newGameButton.addEventListener("click", function() {
-      initGame();
-      requestAnimationFrame(animate);
-    });
-    // 難易度選択に戻るボタン
-    changeDifficultyButton.addEventListener("click", function() {
-      difficultyPanel.style.display = "block";
-      leverButton.style.display = "none";
-      leftButton.style.display = "none";
-      rightButton.style.display = "none";
-      newGameButton.style.display = "none";
-      changeDifficultyButton.style.display = "none";
-      quitButton.style.display = "none";
-      info.innerText = "モードを選択してください。";
-      if (gameMode === "endless") {
-        endlessRoundCount = 0;
-        endlessClearedCount = 0;
-        endlessTotalScore = 0;
-      }
-    });
-    // エンドレスモード用中断ボタン
-    quitButton.addEventListener("click", function() {
-      if (endlessTimeoutId) clearTimeout(endlessTimeoutId);
-      difficultyPanel.style.display = "block";
-      leverButton.style.display = "none";
-      leftButton.style.display = "none";
-      rightButton.style.display = "none";
-      newGameButton.style.display = "none";
-      changeDifficultyButton.style.display = "none";
-      quitButton.style.display = "none";
-      info.innerText = "モードを選択してください。";
-      endlessRoundCount = 0;
-      endlessClearedCount = 0;
-      endlessTotalScore = 0;
-    });
-
-    // モード選択ボタンの動作
-    easyModeButton.addEventListener("click", function() {
+    // イベントリスナー設定
+    document.getElementById("easyModeButton").addEventListener("click", function() {
       gameMode = "normal";
       difficultyMode = "easy";
       initGame();
       requestAnimationFrame(animate);
     });
-    hardModeButton.addEventListener("click", function() {
+    
+    document.getElementById("hardModeButton").addEventListener("click", function() {
       gameMode = "normal";
       difficultyMode = "hard";
       initGame();
       requestAnimationFrame(animate);
     });
-    endless30Button.addEventListener("click", function() {
+    
+    document.getElementById("endless30Button").addEventListener("click", function() {
       gameMode = "endless";
       endlessTotalTime = 30000;
       endlessStartTime = performance.now();
@@ -393,7 +414,8 @@
       initGame();
       requestAnimationFrame(animate);
     });
-    endless60Button.addEventListener("click", function() {
+    
+    document.getElementById("endless60Button").addEventListener("click", function() {
       gameMode = "endless";
       endlessTotalTime = 60000;
       endlessStartTime = performance.now();
@@ -403,14 +425,101 @@
       initGame();
       requestAnimationFrame(animate);
     });
-    ultraHardButton.addEventListener("click", function() {
+    
+    document.getElementById("ultraHardButton").addEventListener("click", function() {
       gameMode = "ultraHard";
       initGame();
       requestAnimationFrame(animate);
     });
 
-    // 初期状態：モード選択パネルを表示
-    difficultyPanel.style.display = "block";
+    // 操作ボタンイベントリスナー
+    buttons.leverButton.addEventListener("click", function() {
+      trolleyLane = (trolleyLane === 0) ? 1 : 0;
+      drawGame();
+    });
+    
+    buttons.leftButton.addEventListener("click", function() {
+      if (gameMode === "ultraHard" && trolleyLane > 0) {
+        trolleyLane--;
+        drawGame();
+      }
+    });
+    
+    buttons.rightButton.addEventListener("click", function() {
+      if (gameMode === "ultraHard" && trolleyLane < laneCount - 1) {
+        trolleyLane++;
+        drawGame();
+      }
+    });
+
+    // 新しくゲームを始めるボタン
+    buttons.newGameButton.addEventListener("click", function() {
+      initGame();
+      requestAnimationFrame(animate);
+    });
+    
+    // 難易度選択に戻るボタン
+    buttons.changeDifficultyButton.addEventListener("click", function() {
+      difficultyPanel.classList.remove('hidden');
+      
+      setButtonVisibility({
+        leverButton: false,
+        leftButton: false,
+        rightButton: false,
+        quitButton: false,
+        newGameButton: false,
+        changeDifficultyButton: false
+      });
+      
+      info.innerText = "モードを選択してください。";
+      
+      if (gameMode === "endless") {
+        endlessRoundCount = 0;
+        endlessClearedCount = 0;
+        endlessTotalScore = 0;
+        if (endlessTimeoutId) {
+          clearTimeout(endlessTimeoutId);
+          endlessTimeoutId = null;
+        }
+      }
+      
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    });
+    
+    // エンドレスモード用中断ボタン
+    buttons.quitButton.addEventListener("click", function() {
+      if (endlessTimeoutId) {
+        clearTimeout(endlessTimeoutId);
+        endlessTimeoutId = null;
+      }
+      
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      
+      difficultyPanel.classList.remove('hidden');
+      
+      setButtonVisibility({
+        leverButton: false,
+        leftButton: false,
+        rightButton: false,
+        quitButton: false,
+        newGameButton: false,
+        changeDifficultyButton: false
+      });
+      
+      info.innerText = "モードを選択してください。";
+      endlessRoundCount = 0;
+      endlessClearedCount = 0;
+      endlessTotalScore = 0;
+    });
+
+    // 初期状態を設定
+    updateCache();
   </script>
 </body>
 </html>
